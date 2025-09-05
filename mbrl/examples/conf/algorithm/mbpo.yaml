@@ -1,4 +1,3 @@
-# @package _group_
 name: "mbpo"
 
 normalize: true
@@ -18,6 +17,7 @@ num_eval_episodes: 1
 # --------------------------------------------
 agent:
   _target_: mbrl.third_party.pytorch_sac_pranz24.sac.SAC
+  _recursive_: False
   num_inputs: ???
   action_space:
     _target_: gym.env.Box

@@ -13,7 +13,7 @@ import mbrl.algorithms.planet as planet
 import mbrl.util.env
 
 
-@hydra.main(config_path="conf", config_name="main")
+@hydra.main(config_path="conf", config_name="main", version_base="1.2")
 def run(cfg: omegaconf.DictConfig):
     env, term_fn, reward_fn = mbrl.util.env.EnvHandler.make_env(cfg)
     np.random.seed(cfg.seed)
