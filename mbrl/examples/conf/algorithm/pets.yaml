@@ -1,8 +1,8 @@
-# @package _group_
 name: "pets"
 
 agent:
   _target_: mbrl.planning.TrajectoryOptimizerAgent
+  _recursive_: False
   action_lb: ???
   action_ub: ???
   planning_horizon: ${overrides.planning_horizon}

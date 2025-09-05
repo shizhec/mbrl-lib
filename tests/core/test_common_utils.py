@@ -97,6 +97,7 @@ def test_create_custom_ensemble_dynamics():
     cfg_dict = {
         "dynamics_model": {
             "_target_": "tests.core.test_common_utils.CustomEnsemble",
+            "_recursive_": False,
             "ensemble_size": 5,
             "device": "cpu",
             "propagation_method": "fixed_model",

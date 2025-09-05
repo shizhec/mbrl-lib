@@ -1,10 +1,12 @@
-# @package _group_
+
 _target_: mbrl.models.BasicEnsemble
+_recursive_: False
 ensemble_size: 5
 device: ${device}
 propagation_method: fixed_model
 member_cfg:
   _target_: mbrl.models.GaussianMLP
+  _recursive_: False
   device: ${device}
   num_layers: 4
   in_size: ???

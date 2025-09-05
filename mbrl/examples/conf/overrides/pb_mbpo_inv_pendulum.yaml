@@ -1,4 +1,3 @@
-# @package _group_
 env: "pybulletgym___InvertedPendulumMuJoCoEnv-v0"
 
 term_fn: "inverted_pendulum"
