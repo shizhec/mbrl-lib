@@ -1,0 +1,90 @@
+env: "IsaacGymEnv"
+term_fn: "no_termination"
+
+learned_rewards: true
+trial_length: 1000
+
+num_steps: 12000
+model_batch_size: 256
+validation_ratio: 0.2
+freq_train_model: 250
+
+# CEM Planning parameters
+planning_horizon: 15
+max_iters: 5
+num_particles: 400
+elite_ratio: 0.1
+epsilon: 0.001
+alpha: 0.1
+
+# Model parameters
+model_lr: 0.001
+model_wd: 0.00001
+
+isaac:
+  task_name: KinovaReachingObstacles2
+  sim_device: 'cuda:0'
+  rl_device: 'cuda:0'
+  graphics_device_id: 0
+  headless: True
+  force_render: False
+  multi_gpu: False
+
+  capture_video: False
+  capture_video_freq: 1464
+  capture_video_len: 100
+
+  # if given, will override the device setting in gym. 
+  task:
+    name: KinovaReachingObstacles2
+    debug_vis: False
+    test: False
+    physics_engine: 'physx'
+    env:
+      numEnvs: 256
+      envSpacing: 1.0
+      episodeLength: 300
+      enableDebugVis: False
+
+      clipObservations: 5.0
+      clipActions: 1.0
+
+      kinovaDofNoise: 0.15
+      dofVelocityScale: 1.0
+
+      aggregateMode: 3
+
+      distRewardScale: 0.5
+
+      asset:
+        assetRoot: "../../assets"
+        assetFileNameKinova: "urdf/kinova_description/urdf/j2n6s300_clean.urdf"
+
+      # set to True if you use camera sensors in the environment
+      enableCameraSensors: False
+
+      random_reset: True
+
+    sim:
+      dt: 0.01667 # 1/60
+      substeps: 2
+      up_axis: "z"
+      use_gpu_pipeline: True
+      gravity: [0.0, 0.0, -9.81]
+      physx:
+        num_threads: 4
+        solver_type: 1
+        use_gpu: True # set to False to run on CPU
+        num_position_iterations: 8
+        num_velocity_iterations: 2
+        contact_offset: 0.005
+        rest_offset: 0.0
+        bounce_threshold_velocity: 0.2
+        max_depenetration_velocity: 1000.0
+        default_buffer_size_multiplier: 5.0
+        max_gpu_contact_pairs: 1048576 # 1024*1024
+        num_subscenes: 4
+        contact_collection: 0 # 0: CC_NEVER (don't collect contact info), 1: CC_LAST_SUBSTEP (collect only contacts on last substep), 2: CC_ALL_SUBSTEPS (broken - do not use!)
+
+    task:
+      randomize: False
