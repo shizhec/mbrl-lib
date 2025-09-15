@@ -189,3 +189,56 @@ class ModelEnv:
 
             total_rewards = total_rewards.reshape(-1, num_particles)
             return total_rewards.mean(dim=1)
+
+
+    def evaluate_batched_action_sequences(
+        self,
+        action_sequences: torch.Tensor,
+        initial_states: np.ndarray,
+        num_particles: int,
+    ) -> torch.Tensor:
+        """Evaluates a batch of action sequences on the model with multiple initial states.
+
+        Args:
+            action_sequences (torch.Tensor): a batch of action sequences to evaluate. Shape must
+                be ``(num_envs, population_size, horizon, action_dim)`` for vectorized environments.
+            initial_states (np.ndarray): the initial states for the trajectories. Shape must be
+                ``(num_envs, obs_dim)`` for vectorized environments.
+            num_particles (int): number of times each action sequence is replicated. The final
+                value of the sequence will be the average over its particles values.
+
+        Returns:
+            (torch.Tensor): the accumulated reward for each action sequence per environment.
+                Shape: ``(num_envs, population_size)``
+        """
+        with torch.no_grad():
+            assert len(action_sequences.shape) == 4, "action_sequences must have shape (num_envs, population_size, horizon, action_dim)"
+            num_envs, population_size, horizon, action_dim = action_sequences.shape
+            assert initial_states.ndim == 2, "initial_states must have shape (num_envs, obs_dim)"
+            assert initial_states.shape[0] == num_envs, f"Mismatch: action_sequences has {num_envs} envs, initial_states has {initial_states.shape[0]}"
+            
+            # Reshape to (num_envs * population_size, horizon, action_dim) for processing
+            action_sequences_flat = action_sequences.reshape(-1, horizon, action_dim)
+            
+            # Create batch: (num_envs * population_size * num_particles, obs_dim)
+            initial_obs_batch = np.repeat(initial_states, population_size * num_particles, axis=0).astype(np.float32)
+            model_state = self.reset(initial_obs_batch, return_as_np=False)
+            batch_size = initial_obs_batch.shape[0]
+            total_rewards = torch.zeros(batch_size, 1).to(self.device)
+            terminated = torch.zeros(batch_size, 1, dtype=bool).to(self.device)
+            
+            for time_step in range(horizon):
+                action_for_step = action_sequences_flat[:, time_step, :]  # (num_envs * population_size, action_dim)
+                # Repeat for particles
+                action_batch = torch.repeat_interleave(action_for_step, num_particles, dim=0)
+                
+                _, rewards, dones, model_state = self.step(
+                    action_batch, model_state, sample=True
+                )
+                rewards[terminated] = 0
+                terminated |= dones
+                total_rewards += rewards
+
+            # Reshape to (num_envs, population_size, num_particles) then average over particles
+            total_rewards = total_rewards.reshape(num_envs, population_size, num_particles)
+            return total_rewards.mean(dim=2)  # (num_envs, population_size)

@@ -47,7 +47,7 @@ isaac:
     test: False
     physics_engine: 'physx'
     env:
-      numEnvs: 256
+      numEnvs: 32
       envSpacing: 1.0
       episodeLength: 300
       enableDebugVis: False

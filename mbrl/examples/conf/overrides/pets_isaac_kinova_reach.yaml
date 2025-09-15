@@ -5,21 +5,25 @@ learned_rewards: true
 trial_length: 1000
 
 num_steps: 12000
-model_batch_size: 256
-validation_ratio: 0.2
-freq_train_model: 250
 
 # CEM Planning parameters
 planning_horizon: 15
-max_iters: 5
-num_particles: 400
-elite_ratio: 0.1
-epsilon: 0.001
-alpha: 0.1
+cem_num_iters: 5
+cem_elite_ratio: 0.16
+cem_population_size: 400
+cem_alpha: 0.12
+cem_clipped_normal: false
 
 # Model parameters
-model_lr: 0.001
-model_wd: 0.00001
+num_elites: 5
+model_lr: 0.00028
+model_wd: 0.00010
+model_batch_size: 32
+validation_ratio: 0
+no_delta_list: [ 0 ]
+freq_train_model: 1000
+patience: 12
+num_epochs_train_model: 12
 
 isaac:
   task_name: KinovaReachingObstacles2
@@ -41,7 +45,7 @@ isaac:
     test: False
     physics_engine: 'physx'
     env:
-      numEnvs: 256
+      numEnvs: 32
       envSpacing: 1.0
       episodeLength: 300
       enableDebugVis: False

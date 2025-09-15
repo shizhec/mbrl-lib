@@ -71,12 +71,42 @@ class MockLineEnv(gym.Env):
 def mock_reward_fn(action, obs):
     return -_REW_C * (obs[:, 0] ** 2).unsqueeze(1)
 
+class MockVecEnv(gym.Env):
+    def __init__(self):
+        self.num_envs = 3
+        self.pos = np.array([[1.0], [1.0], [1.0]])
+        self.vel = np.array([[0.0], [0.0], [0.0]])
+        self.time_left = _TRIAL_LEN
+        self.observation_space = gym.spaces.Box(
+            -np.inf * np.ones(2), np.inf * np.ones(2), dtype=np.float32, shape=(2,)
+        )
+        self.action_space = gym.spaces.Box(
+            -np.ones(1), np.ones(1), dtype=np.float32, shape=(1,)
+        )
+        self.action_space.seed(SEED)
+        self.observation_space.seed(SEED)
+    
+    def reset(self, seed=None):
+        super().reset(seed=seed)
+        self.pos = np.array([[1.0], [1.0], [1.0]])
+        self.vel = np.array([[0.0], [0.0], [0.0]])
+        self.time_left = _TRIAL_LEN
+        return np.concatenate([self.pos, self.vel], axis=-1), {}
+    
+    def step(self, action: np.ndarray):
+        self.vel += action
+        self.pos += self.vel
+        self.time_left -= 1
+        done = np.array([self.time_left == 0] * self.num_envs)
+        truncated = np.array([False] * self.num_envs)
+        reward = -_REW_C * (self.pos ** 2)
+        return np.concatenate([self.pos, self.vel], axis=-1), reward.squeeze(-1), done, truncated, {}
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 
 # TODO replace this using pytest fixture
-def _check_pets(model_type):
+def _check_pets(model_type, vecterized=False):
     with open(_REPO_DIR / _CONF_DIR / "algorithm" / "pets.yaml", "r") as f:
         algorithm_cfg = yaml.safe_load(f)
 
@@ -120,7 +150,11 @@ def _check_pets(model_type):
     if model_type == "basic_ensemble":
         cfg.dynamics_model.member_cfg.deterministic = True
 
-    env = MockLineEnv()
+    if vecterized:
+        env = MockVecEnv()
+    else:
+        env = MockLineEnv()
+
     term_fn = mbrl_env.termination_fns.no_termination
     reward_fn = mock_reward_fn
 
@@ -190,12 +224,20 @@ def test_pets_gaussian_mlp_ensemble():
     _check_pets("gaussian_mlp_ensemble")
 
 
+def test_pets_gaussian_mlp_ensemble_vectorized():
+    _check_pets("gaussian_mlp_ensemble", vecterized=True)
+
+
 def test_pets_mppi_gaussian_mlp_ensemble():
     _check_pets_mppi("gaussian_mlp_ensemble")
 
 
 def test_pets_basic_ensemble_deterministic_mlp():
     _check_pets("basic_ensemble")
+
+
+def test_pets_basic_ensemble_deterministic_mlp_vectorized():
+    _check_pets("basic_ensemble", vecterized=True)
 
 
 def _check_pets_icem(model_type):
@@ -264,6 +306,14 @@ def test_pets_icem_basic_ensemble_deterministic_mlp():
 
 
 def test_mbpo():
+    _test_mbpo()
+
+
+def test_mbpo_vectorized():
+    _test_mbpo(vecterized=True)
+
+
+def _test_mbpo(vecterized=False):
     with open(_REPO_DIR / _CONF_DIR / "algorithm" / "mbpo.yaml", "r") as f:
         algorithm_cfg = yaml.safe_load(f)
 
@@ -313,8 +363,12 @@ def test_mbpo():
     cfg.algorithm.initial_exploration_steps = _INITIAL_EXPLORE
     cfg.algorithm.dataset_size = _TRIAL_LEN * _NUM_TRIALS_MBPO + _INITIAL_EXPLORE
 
-    env = MockLineEnv()
-    test_env = MockLineEnv()
+    if vecterized:
+        env = MockVecEnv()
+        test_env = MockVecEnv()
+    else:
+        env = MockLineEnv()
+        test_env = MockLineEnv()
     term_fn = mbrl_env.termination_fns.no_termination
 
     max_reward = mbpo.train(

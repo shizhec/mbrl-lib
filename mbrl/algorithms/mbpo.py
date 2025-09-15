@@ -21,6 +21,7 @@ import mbrl.util.common
 import mbrl.util.math
 from mbrl.planning.sac_wrapper import SACAgent
 from mbrl.third_party.pytorch_sac import VideoRecorder
+from mbrl.util.common import is_episode_done
 
 MBPO_LOG_FORMAT = mbrl.constants.EVAL_LOG_FORMAT + [
     ("epoch", "E", "int"),
@@ -76,7 +77,7 @@ def evaluate(
         terminated = False
         truncated = False
         episode_reward = 0.0
-        while not terminated and not truncated:
+        while not is_episode_done(terminated, truncated):
             action = agent.act(obs)
             obs, reward, terminated, truncated, _ = env.step(action)
             video_recorder.record(env)
@@ -208,7 +209,7 @@ def train(
         terminated = False
         truncated = False
         for steps_epoch in range(cfg.overrides.epoch_length):
-            if steps_epoch == 0 or terminated or truncated:
+            if steps_epoch == 0 or is_episode_done(terminated, truncated):
                 steps_epoch = 0
                 obs, _ = env.reset()
                 terminated = False
@@ -279,6 +280,8 @@ def train(
                 avg_reward = evaluate(
                     test_env, agent, cfg.algorithm.num_eval_episodes, video_recorder
                 )
+                if isinstance(avg_reward, np.ndarray):
+                    avg_reward = np.mean(avg_reward)
                 logger.log_data(
                     mbrl.constants.RESULTS_LOG_NAME,
                     {

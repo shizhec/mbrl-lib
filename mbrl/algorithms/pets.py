@@ -17,6 +17,7 @@ import mbrl.types
 import mbrl.util
 import mbrl.util.common
 import mbrl.util.math
+from mbrl.util.common import is_episode_done
 
 EVAL_LOG_FORMAT = mbrl.constants.EVAL_LOG_FORMAT
 
@@ -85,8 +86,11 @@ def train(
         logger=logger,
     )
 
+    # Detect number of environments from wrapper
+    num_envs = getattr(env, 'num_envs', 1)
+    
     agent = mbrl.planning.create_trajectory_optim_agent_for_model(
-        model_env, cfg.algorithm.agent, num_particles=cfg.algorithm.num_particles
+        model_env, cfg.algorithm.agent, num_particles=cfg.algorithm.num_particles, num_envs=num_envs
     )
 
     # ---------------------------------------------------------
@@ -101,7 +105,7 @@ def train(
         truncated = False
         total_reward = 0.0
         steps_trial = 0
-        while not terminated and not truncated:
+        while not is_episode_done(terminated, truncated):
             # --------------- Model Training -----------------
             if env_steps % cfg.algorithm.freq_train_model == 0:
                 mbrl.util.common.train_model_and_save_model_and_data(
@@ -124,6 +128,10 @@ def train(
             )
 
             obs = next_obs
+            # Handle vector rewards from vectorized environments
+            if num_envs > 1:
+                reward = np.mean(reward)
+
             total_reward += reward
             steps_trial += 1
             env_steps += 1

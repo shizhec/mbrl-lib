@@ -57,6 +57,7 @@ class RandomAgent(Agent):
     """
 
     def __init__(self, env: gym.Env):
+        self.num_envs = getattr(env, 'num_envs', 1)
         self.env = env
 
     def act(self, *_args, **_kwargs) -> np.ndarray:
@@ -65,7 +66,10 @@ class RandomAgent(Agent):
         Returns:
             (np.ndarray): an action sampled from the environment's action space.
         """
-        return self.env.action_space.sample()
+        if self.num_envs > 1:
+            return np.array([self.env.action_space.sample() for _ in range(self.num_envs)])
+        else:
+            return self.env.action_space.sample()
 
 
 def complete_agent_cfg(

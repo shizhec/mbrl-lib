@@ -117,7 +117,6 @@ class CEMOptimizer(Optimizer):
             pop = mean + dispersion * torch.randn_like(population)
             pop = torch.where(pop > self.lower_bound, pop, self.lower_bound)
             population = torch.where(pop < self.upper_bound, pop, self.upper_bound)
-            return population
         else:
             lb_dist = mean - self.lower_bound
             ub_dist = self.upper_bound - mean
@@ -125,16 +124,31 @@ class CEMOptimizer(Optimizer):
             constrained_var = torch.min(mv, dispersion)
 
             population = mbrl.util.math.truncated_normal_(population)
-            return population * torch.sqrt(constrained_var) + mean
+            if self.num_envs > 1:
+                population = population * torch.sqrt(constrained_var).unsqueeze(1) + mean.unsqueeze(1)
+            else:
+                population = population * torch.sqrt(constrained_var) + mean
+        
+        return population
 
     def _update_population_params(
         self, elite: torch.Tensor, mu: torch.Tensor, dispersion: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        new_mu = torch.mean(elite, dim=0)
-        if self._clipped_normal:
-            new_dispersion = torch.std(elite, dim=0)
+        if self.num_envs > 1:
+            # For vectorized environments: elite shape is (num_envs, elite_num, horizon, action_dim)
+            # Compute statistics along the elite_num dimension (dim=1)
+            new_mu = torch.mean(elite, dim=1)  # (num_envs, horizon, action_dim)
+            if self._clipped_normal:
+                new_dispersion = torch.std(elite, dim=1)
+            else:
+                new_dispersion = torch.var(elite, dim=1)
         else:
-            new_dispersion = torch.var(elite, dim=0)
+            # Single environment: original logic
+            new_mu = torch.mean(elite, dim=0)
+            if self._clipped_normal:
+                new_dispersion = torch.std(elite, dim=0)
+            else:
+                new_dispersion = torch.var(elite, dim=0)
         mu = self.alpha * mu + (1 - self.alpha) * new_mu
         dispersion = self.alpha * dispersion + (1 - self.alpha) * new_dispersion
         return mu, dispersion
@@ -161,12 +175,25 @@ class CEMOptimizer(Optimizer):
         Returns:
             (torch.Tensor): the best solution found.
         """
+        self.num_envs = 1 if x0.ndim == 2 else x0.shape[0]
+
         mu, dispersion = self._init_population_params(x0)
         best_solution = torch.empty_like(mu)
-        best_value = -np.inf
-        population = torch.zeros((self.population_size,) + x0.shape).to(
-            device=self.device
-        )
+        
+        if self.num_envs > 1:
+            # Vectorized environments: best_value per environment
+            best_value = torch.full((self.num_envs,), -np.inf, device=self.device)
+            # Population shape: (num_envs, population_size, horizon, action_dim)
+            population = torch.zeros((self.num_envs, self.population_size,) + x0.shape[1:]).to(
+                device=self.device
+            )
+        else:
+            # Single environment: original logic
+            best_value = -np.inf
+            population = torch.zeros((self.population_size,) + x0.shape).to(
+                device=self.device
+            )
+        
         for i in range(self.num_iterations):
             population = self._sample_population(mu, dispersion, population)
             values = obj_fun(population)
@@ -176,14 +203,30 @@ class CEMOptimizer(Optimizer):
 
             # filter out NaN values
             values[values.isnan()] = -1e-10
-            best_values, elite_idx = values.topk(self.elite_num)
-            elite = population[elite_idx]
+            
+            if self.num_envs > 1:
+                # For vectorized: values shape is (num_envs, population_size)
+                best_values, elite_idx = values.topk(self.elite_num, dim=1)
+                # elite shape: (num_envs, elite_num, horizon, action_dim)
+                elite = torch.gather(population, 1, elite_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, *x0.shape[1:]))
+            else:
+                # Single environment: original logic
+                best_values, elite_idx = values.topk(self.elite_num)
+                elite = population[elite_idx]
 
             mu, dispersion = self._update_population_params(elite, mu, dispersion)
 
-            if best_values[0] > best_value:
-                best_value = best_values[0]
-                best_solution = population[elite_idx[0]].clone()
+            if self.num_envs > 1:
+                # For vectorized environments: track best solution per environment
+                for env_idx in range(self.num_envs):
+                    if best_values[env_idx, 0] > best_value[env_idx]:
+                        best_value[env_idx] = best_values[env_idx, 0]
+                        best_solution[env_idx] = population[env_idx, elite_idx[env_idx, 0]].clone()
+            else:
+                # Single environment: original logic
+                if best_values[0] > best_value:
+                    best_value = best_values[0]
+                    best_solution = population[elite_idx[0]].clone()
 
         return mu if self.return_mean_elites else best_solution
 
@@ -521,16 +564,32 @@ class TrajectoryOptimizer:
         planning_horizon: int,
         replan_freq: int = 1,
         keep_last_solution: bool = True,
+        num_envs: int = 1,
     ):
-        optimizer_cfg.lower_bound = np.tile(action_lb, (planning_horizon, 1)).tolist()
-        optimizer_cfg.upper_bound = np.tile(action_ub, (planning_horizon, 1)).tolist()
+        self.num_envs = num_envs
+
+        if num_envs > 1:
+            # For vectorized: (num_envs, planning_horizon, action_dim)
+            optimizer_cfg.lower_bound = np.tile(action_lb, (num_envs, planning_horizon, 1)).tolist()
+            optimizer_cfg.upper_bound = np.tile(action_ub, (num_envs, planning_horizon, 1)).tolist()
+        else:
+            # For single env: (planning_horizon, action_dim) 
+            optimizer_cfg.lower_bound = np.tile(action_lb, (planning_horizon, 1)).tolist()
+            optimizer_cfg.upper_bound = np.tile(action_ub, (planning_horizon, 1)).tolist()
+
         self.optimizer: Optimizer = hydra.utils.instantiate(optimizer_cfg)
+        
         self.initial_solution = (
             ((torch.tensor(action_lb) + torch.tensor(action_ub)) / 2)
             .float()
             .to(optimizer_cfg.device)
         )
-        self.initial_solution = self.initial_solution.repeat((planning_horizon, 1))
+        if num_envs > 1:
+            # For vectorized environments: (num_envs, planning_horizon, action_dim)
+            self.initial_solution = self.initial_solution.repeat((num_envs, planning_horizon, 1))
+        else:
+            # For single environment: (planning_horizon, action_dim)
+            self.initial_solution = self.initial_solution.repeat((planning_horizon, 1))
         self.previous_solution = self.initial_solution.clone()
         self.replan_freq = replan_freq
         self.keep_last_solution = keep_last_solution
@@ -561,10 +620,17 @@ class TrajectoryOptimizer:
             callback=callback,
         )
         if self.keep_last_solution:
-            self.previous_solution = best_solution.roll(-self.replan_freq, dims=0)
-            # Note that initial_solution[i] is the same for all values of [i],
-            # so just pick i = 0
-            self.previous_solution[-self.replan_freq :] = self.initial_solution[0]
+            if self.num_envs > 1:
+                # For vectorized: best_solution shape is (num_envs, horizon, action_dim)
+                self.previous_solution = best_solution.roll(-self.replan_freq, dims=1)
+                # Fill the end with initial solution for each environment
+                self.previous_solution[:, -self.replan_freq:, :] = self.initial_solution[:, 0, :].unsqueeze(1)
+            else:
+                # Single environment: original logic
+                self.previous_solution = best_solution.roll(-self.replan_freq, dims=0)
+                # Note that initial_solution[i] is the same for all values of [i],
+                # so just pick i = 0
+                self.previous_solution[-self.replan_freq :] = self.initial_solution[0]
         return best_solution.cpu().numpy()
 
     def reset(self):
@@ -609,6 +675,7 @@ class TrajectoryOptimizerAgent(Agent):
         replan_freq: int = 1,
         verbose: bool = False,
         keep_last_solution: bool = True,
+        num_envs: int = 1,
     ):
         self.optimizer = TrajectoryOptimizer(
             optimizer_cfg,
@@ -617,7 +684,9 @@ class TrajectoryOptimizerAgent(Agent):
             planning_horizon=planning_horizon,
             replan_freq=replan_freq,
             keep_last_solution=keep_last_solution,
+            num_envs=num_envs,
         )
+        self.num_envs = num_envs
         self.optimizer_args = {
             "optimizer_cfg": optimizer_cfg,
             "action_lb": np.array(action_lb),
@@ -663,17 +732,22 @@ class TrajectoryOptimizerAgent(Agent):
         After that, the method will plan again, and repeat this process.
 
         Args:
-            obs (np.ndarray): the observation for which the action is needed.
+            obs (np.ndarray): the observation for which the action is needed. Can be either
+                (obs_dim,) for single environment or (num_envs, obs_dim) for vectorized environments.
             optimizer_callback (callable, optional): a callback function
                 to pass to the optimizer.
 
         Returns:
-            (np.ndarray): the action.
+            (np.ndarray): the action. Shape (action_dim,) for single environment or 
+                (num_envs, action_dim) for vectorized environments.
         """
         if self.trajectory_eval_fn is None:
             raise RuntimeError(
                 "Please call `set_trajectory_eval_fn()` before using TrajectoryOptimizerAgent"
             )
+        
+        is_vectorized = obs.ndim == 2
+        
         plan_time = 0.0
         if not self.actions_to_use:  # re-plan is necessary
 
@@ -686,7 +760,14 @@ class TrajectoryOptimizerAgent(Agent):
             )
             plan_time = time.time() - start_time
 
-            self.actions_to_use.extend([a for a in plan[: self.replan_freq]])
+            if is_vectorized:
+                # For vectorized environments with vectorized CEM: plan already has shape (num_envs, horizon, action_dim)
+                # Store actions for each environment: list of (num_envs, action_dim)
+                self.actions_to_use.extend([plan[:, i, :] for i in range(min(self.replan_freq, plan.shape[1]))])
+            else:
+                # Single environment: original logic
+                self.actions_to_use.extend([a for a in plan[: self.replan_freq]])
+                
         action = self.actions_to_use.pop(0)
 
         if self.verbose:
@@ -720,6 +801,7 @@ def create_trajectory_optim_agent_for_model(
     model_env: mbrl.models.ModelEnv,
     agent_cfg: omegaconf.DictConfig,
     num_particles: int = 1,
+    num_envs: int = 1,
 ) -> TrajectoryOptimizerAgent:
     """Utility function for creating a trajectory optimizer agent for a model environment.
 
@@ -738,12 +820,23 @@ def create_trajectory_optim_agent_for_model(
 
     """
     complete_agent_cfg(model_env, agent_cfg)
+    # Add num_envs to agent config if not already present
+    if 'num_envs' not in agent_cfg:
+        with omegaconf.open_dict(agent_cfg):
+            agent_cfg.num_envs = num_envs
     agent = hydra.utils.instantiate(agent_cfg)
 
     def trajectory_eval_fn(initial_state, action_sequences):
-        return model_env.evaluate_action_sequences(
-            action_sequences, initial_state=initial_state, num_particles=num_particles
-        )
+        if initial_state.ndim == 2:
+            # Vectorized environments
+            return model_env.evaluate_batched_action_sequences(
+                action_sequences, initial_states=initial_state, num_particles=num_particles
+            )
+        else:
+            # Single environment
+            return model_env.evaluate_action_sequences(
+                action_sequences, initial_state=initial_state, num_particles=num_particles
+            )
 
     agent.set_trajectory_eval_fn(trajectory_eval_fn)
     return agent

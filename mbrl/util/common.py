@@ -454,6 +454,25 @@ def rollout_model_env(
     return np.stack(obs_history), np.stack(reward_history), plan
 
 
+def is_episode_done(terminated, truncated):
+    """
+    Check if episode(s) are done, handling both scalar and array cases.
+    
+    Args:
+        terminated: Boolean or array of booleans indicating termination
+        truncated: Boolean or array of booleans indicating truncation
+        
+    Returns:
+        Boolean indicating if episode(s) are done
+    """
+    if np.isscalar(terminated):
+        # Single environment case
+        return terminated or truncated
+    else:
+        # Vectorized environment case - all environments must be done
+        return np.all(terminated) or np.all(truncated)
+
+
 def rollout_agent_trajectories(
     env: gym.Env,
     steps_or_trials_to_collect: int,
@@ -519,7 +538,7 @@ def rollout_agent_trajectories(
         terminated = False
         truncated = False
         total_reward = 0.0
-        while not terminated and not truncated:
+        while not is_episode_done(terminated, truncated):
             if replay_buffer is not None:
                 next_obs, reward, terminated, truncated, _ = step_env_and_add_to_buffer(
                     env,
@@ -602,9 +621,15 @@ def step_env_and_add_to_buffer(
         agent_obs = getattr(env, "get_last_low_dim_obs")()
     else:
         agent_obs = obs
+
     action = agent.act(agent_obs, **agent_kwargs)
     next_obs, reward, terminated, truncated, info = env.step(action)
-    replay_buffer.add(obs, action, next_obs, reward, terminated, truncated)
+    if hasattr(agent_obs, 'ndim') and agent_obs.ndim == 2:
+        replay_buffer.add_batch(
+            obs, action, next_obs, reward, terminated, truncated
+        )
+    else:
+        replay_buffer.add(obs, action, next_obs, reward, terminated, truncated)
     if callback:
         callback((obs, action, next_obs, reward, terminated, truncated))
     return next_obs, reward, terminated, truncated, info
