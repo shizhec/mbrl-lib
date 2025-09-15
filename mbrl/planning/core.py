@@ -67,7 +67,7 @@ class RandomAgent(Agent):
             (np.ndarray): an action sampled from the environment's action space.
         """
         if self.num_envs > 1:
-            return np.array([self.env.action_space.sample() for _ in range(self.num_envs)])
+            return np.stack([self.env.action_space.sample() for _ in range(self.num_envs)])
         else:
             return self.env.action_space.sample()
 
