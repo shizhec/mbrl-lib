@@ -157,11 +157,15 @@ class Model(nn.Module, abc.ABC):
         optimizer.zero_grad()
         loss, meta = self.loss(model_in, target)
         loss.backward()
+        if hasattr(self, 'grad_clip') and self.grad_clip:
+            torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=self.grad_clip_value)
         if meta is not None:
             with torch.no_grad():
                 grad_norm = 0.0
                 for p in list(filter(lambda p: p.grad is not None, self.parameters())):
                     grad_norm += p.grad.data.norm(2).item() ** 2
+                # max_grad = max(p.grad.abs().max().item() for p in self.parameters() if p.grad is not None)
+                # print("Max individual grad:", max_grad)
                 meta["grad_norm"] = grad_norm
         optimizer.step()
         return loss.item(), meta

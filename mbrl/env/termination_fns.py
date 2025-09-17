@@ -93,3 +93,27 @@ def humanoid(act: torch.Tensor, next_obs: torch.Tensor):
 
     done = done[:, None]
     return done
+
+
+def motionplan(act: torch.Tensor, next_obs: torch.Tensor):
+    assert len(next_obs.shape) == 2
+
+    threshold = 0.15
+
+    # Extract particle position (first 2 elements) and target position (elements 4-6)
+    particle_pos = next_obs[:, 0:2]  # [x, y]
+    target_pos = next_obs[:, 4:6]    # [target_x, target_y]
+
+    # Calculate distance to target
+    dist_to_target = torch.norm(particle_pos - target_pos, dim=1)
+
+    # Target reached if distance < threshold
+    target_reached = dist_to_target < threshold
+
+    # Also check for invalid states
+    valid_state = torch.isfinite(next_obs).all(-1)
+
+    # Terminate if target reached or invalid state
+    done = target_reached | (~valid_state)
+    done = done[:, None]
+    return done

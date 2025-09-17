@@ -1,7 +1,7 @@
 env: "IsaacGymEnv"
 term_fn: "no_termination"
 
-num_steps: 12000
+num_steps: 312500
 epoch_length: 300
 num_elites: 5
 patience: 5

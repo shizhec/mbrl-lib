@@ -78,6 +78,10 @@ class GaussianMLP(Ensemble):
         propagation_method: Optional[str] = None,
         learn_logvar_bounds: bool = False,
         activation_fn_cfg: Optional[Union[Dict, omegaconf.DictConfig]] = None,
+        grad_clip: bool = False,
+        grad_clip_value: float = 5.0,
+        use_spectral_norm: bool = False,
+        use_layer_norm: bool = False,
     ):
         super().__init__(
             ensemble_size, device, propagation_method, deterministic=deterministic
@@ -85,6 +89,10 @@ class GaussianMLP(Ensemble):
 
         self.in_size = in_size
         self.out_size = out_size
+        self.grad_clip = grad_clip
+        self.grad_clip_value = grad_clip_value
+        self.use_spectral_norm = use_spectral_norm
+        self.use_layer_norm = use_layer_norm
 
         def create_activation():
             if activation_fn_cfg is None:
@@ -96,18 +104,27 @@ class GaussianMLP(Ensemble):
             return activation_func
 
         def create_linear_layer(l_in, l_out):
-            return EnsembleLinearLayer(ensemble_size, l_in, l_out)
+            layer = EnsembleLinearLayer(ensemble_size, l_in, l_out)
+            if self.use_spectral_norm:
+                layer = nn.utils.spectral_norm(layer)
+            return layer
 
-        hidden_layers = [
-            nn.Sequential(create_linear_layer(in_size, hid_size), create_activation())
-        ]
-        for i in range(num_layers - 1):
-            hidden_layers.append(
-                nn.Sequential(
-                    create_linear_layer(hid_size, hid_size),
-                    create_activation(),
-                )
-            )
+        hidden_layers = []
+        # First layer
+        first_layer = [create_linear_layer(in_size, hid_size)]
+        if self.use_layer_norm:
+            first_layer.append(nn.LayerNorm(hid_size))
+        first_layer.append(create_activation())
+        hidden_layers.append(nn.Sequential(*first_layer))
+
+        # Hidden layers
+        for _ in range(num_layers - 1):
+            layer_components = [create_linear_layer(hid_size, hid_size)]
+            if self.use_layer_norm:
+                layer_components.append(nn.LayerNorm(hid_size))
+            layer_components.append(create_activation())
+            hidden_layers.append(nn.Sequential(*layer_components))
+
         self.hidden_layers = nn.Sequential(*hidden_layers)
 
         if deterministic:

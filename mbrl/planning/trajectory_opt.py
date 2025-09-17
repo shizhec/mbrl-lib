@@ -217,11 +217,21 @@ class CEMOptimizer(Optimizer):
             mu, dispersion = self._update_population_params(elite, mu, dispersion)
 
             if self.num_envs > 1:
-                # For vectorized environments: track best solution per environment
-                for env_idx in range(self.num_envs):
-                    if best_values[env_idx, 0] > best_value[env_idx]:
-                        best_value[env_idx] = best_values[env_idx, 0]
-                        best_solution[env_idx] = population[env_idx, elite_idx[env_idx, 0]].clone()
+                # Vectorized best solution tracking - no loops!
+                current_best = best_values[:, 0]  # (num_envs,)
+                improvement_mask = current_best > best_value  # (num_envs,)
+
+                # Update best_value using mask
+                best_value = torch.where(improvement_mask, current_best, best_value)
+
+                # Update best_solution using mask
+                current_best_solutions = torch.gather(
+                    population, 1,
+                    elite_idx[:, 0:1].unsqueeze(-1).unsqueeze(-1).expand(-1, 1, *x0.shape[1:])
+                ).squeeze(1)  # (num_envs, horizon, action_dim)
+
+                improvement_mask_expanded = improvement_mask.unsqueeze(-1).unsqueeze(-1).expand_as(best_solution)
+                best_solution = torch.where(improvement_mask_expanded, current_best_solutions, best_solution)
             else:
                 # Single environment: original logic
                 if best_values[0] > best_value:

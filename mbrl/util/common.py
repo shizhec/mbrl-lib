@@ -178,7 +178,7 @@ def create_replay_buffer(
         cfg.algorithm.get("dataset_size", None) if "algorithm" in cfg else None
     )
     if not dataset_size:
-        dataset_size = cfg.overrides.num_steps
+        dataset_size = int(cfg.overrides.num_steps)
     maybe_max_trajectory_len = None
     if collect_trajectories:
         if cfg.overrides.trial_length is None:
