@@ -1,0 +1,12 @@
+_target_: mbrl.models.analytical_model.AnalyticalModel
+dynamics_model:
+    _target_: common.dynamics.particle.ParticleModel
+    map_mode: ???
+    device: ${device}
+reward_fn: None  # Will use learned rewards
+device: ${device}
+learned_rewards: True
+obs_dim: ???
+action_dim: ???
+in_size: ???
+out_size: ???

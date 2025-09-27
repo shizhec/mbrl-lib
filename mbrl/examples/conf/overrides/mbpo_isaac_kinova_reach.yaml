@@ -2,9 +2,10 @@ env: "IsaacGymEnv"
 term_fn: "no_termination"
 
 num_steps: 312500
-epoch_length: 300
+epoch_length: 1000
 num_elites: 5
-patience: 5
+patience: 25
+num_epochs_train_model: 25
 model_lr: 0.001
 model_wd: 0.00001
 model_batch_size: 256

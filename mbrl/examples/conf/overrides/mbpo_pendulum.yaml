@@ -4,6 +4,7 @@ term_fn: "no_termination"
 num_steps: 12000
 epoch_length: 200
 num_elites: 5
+num_epochs_train_model: 10
 patience: 5
 model_lr: 0.001
 model_wd: 0.00001

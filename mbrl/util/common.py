@@ -49,6 +49,7 @@ def create_one_dim_tr_model(
             -learned_rewards (bool): whether rewards should be learned or not
             -target_is_delta (bool): to be passed to the dynamics model wrapper
             -normalize (bool): to be passed to the dynamics model wrapper
+            -use_analytical_model (bool, optional): whether to use analytical model instead of learned
           -overrides
             -no_delta_list (list[int], optional): to be passed to the dynamics model wrapper
             -obs_process_fn (str, optional): a Python function to pre-process observations
@@ -74,36 +75,57 @@ def create_one_dim_tr_model(
         (:class:`mbrl.models.OneDTransitionRewardModel`): the model created.
 
     """
-    # This first part takes care of the case where model is BasicEnsemble and in/out sizes
-    # are handled by member_cfg
-    model_cfg = cfg.dynamics_model
-    if issubclass(hydra.utils._locate(model_cfg._target_), mbrl.models.BasicEnsemble):
-        model_cfg = model_cfg.member_cfg
-    if model_cfg.get("in_size", None) is None:
-        model_cfg.in_size = obs_shape[0] + (act_shape[0] if act_shape else 1)
-    if model_cfg.get("out_size", None) is None:
-        model_cfg.out_size = obs_shape[0] + int(cfg.algorithm.learned_rewards)
+    # Check if using analytical model
+    use_analytical = cfg.dynamics_model.get("dynamics_model", False)
+    if use_analytical:
+        # Set dimensions in the dynamics model config
+        model_cfg = cfg.dynamics_model.copy()
+        model_cfg.obs_dim = obs_shape[-1]
+        model_cfg.action_dim = act_shape[-1]
+        model_cfg.in_size = obs_shape[-1] + act_shape[-1]
+        model_cfg.out_size = obs_shape[-1] + int(cfg.algorithm.learned_rewards)
 
-    # Now instantiate the model
-    model = hydra.utils.instantiate(cfg.dynamics_model)
+        # Create base analytical model with dimensions
+        model = hydra.utils.instantiate(model_cfg)
 
-    name_obs_process_fn = cfg.overrides.get("obs_process_fn", None)
-    if name_obs_process_fn:
-        obs_process_fn = hydra.utils.get_method(cfg.overrides.obs_process_fn)
+        # Create wrapped model with conversion functions
+        dynamics_model = mbrl.models.AnalyticalOneDTransitionRewardModel(
+            model,
+            learned_rewards=cfg.algorithm.learned_rewards
+        )
     else:
-        obs_process_fn = None
-    dynamics_model = mbrl.models.OneDTransitionRewardModel(
-        model,
-        target_is_delta=cfg.algorithm.target_is_delta,
-        normalize=cfg.algorithm.normalize,
-        normalize_double_precision=cfg.algorithm.get(
-            "normalize_double_precision", False
-        ),
-        learned_rewards=cfg.algorithm.learned_rewards,
-        obs_process_fn=obs_process_fn,
-        no_delta_list=cfg.overrides.get("no_delta_list", None),
-        num_elites=cfg.overrides.get("num_elites", None),
-    )
+        # Original learned model creation logic
+        # This first part takes care of the case where model is BasicEnsemble and in/out sizes
+        # are handled by member_cfg
+        model_cfg = cfg.dynamics_model
+        if issubclass(hydra.utils._locate(model_cfg._target_), mbrl.models.BasicEnsemble):
+            model_cfg = model_cfg.member_cfg
+        if model_cfg.get("in_size", None) is None:
+            model_cfg.in_size = obs_shape[0] + (act_shape[0] if act_shape else 1)
+        if model_cfg.get("out_size", None) is None:
+            model_cfg.out_size = obs_shape[0] + int(cfg.algorithm.learned_rewards)
+
+        # Now instantiate the model
+        model = hydra.utils.instantiate(cfg.dynamics_model)
+
+        name_obs_process_fn = cfg.overrides.get("obs_process_fn", None)
+        if name_obs_process_fn:
+            obs_process_fn = hydra.utils.get_method(cfg.overrides.obs_process_fn)
+        else:
+            obs_process_fn = None
+        
+        dynamics_model = mbrl.models.OneDTransitionRewardModel(
+            model,
+            target_is_delta=cfg.algorithm.target_is_delta,
+            normalize=cfg.algorithm.normalize,
+            normalize_double_precision=cfg.algorithm.get(
+                "normalize_double_precision", False
+            ),
+            learned_rewards=cfg.algorithm.learned_rewards,
+            obs_process_fn=obs_process_fn,
+            no_delta_list=cfg.overrides.get("no_delta_list", None),
+            num_elites=cfg.overrides.get("num_elites", None),
+        )
     if model_dir:
         dynamics_model.load(model_dir)
 
@@ -400,6 +422,12 @@ def train_model_and_save_model_and_data(
     )
     if hasattr(model, "update_normalizer"):
         model.update_normalizer(replay_buffer.get_all())
+
+    # For analytical models, disable evaluation since dynamics are perfect
+    evaluate = True
+    if cfg.get("use_analytical_model", False):
+        evaluate = False
+
     model_trainer.train(
         dataset_train,
         dataset_val=dataset_val,
@@ -407,6 +435,7 @@ def train_model_and_save_model_and_data(
         patience=cfg.get("patience", 1),
         improvement_threshold=cfg.get("improvement_threshold", 0.01),
         callback=callback,
+        evaluate=evaluate,
     )
     if work_dir is not None:
         model.save(str(work_dir))
