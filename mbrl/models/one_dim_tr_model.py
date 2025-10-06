@@ -13,6 +13,8 @@ import mbrl.types
 import mbrl.util.math
 
 from .model import Ensemble, Model
+from .analytical_model import AnalyticalModel
+from .hybrid_dynamics_model import HybridDynamicsModel
 
 MODEL_LOG_FORMAT = [
     ("train_iteration", "I", "int"),
@@ -330,3 +332,34 @@ class OneDTransitionRewardModel(Model):
     def set_propagation_method(self, propagation_method: Optional[str] = None):
         if isinstance(self.model, Ensemble):
             self.model.set_propagation_method(propagation_method)
+
+class AnalyticalOneDTransitionRewardModel(OneDTransitionRewardModel):
+    """
+    Analytical model that inherits from OneDTransitionRewardModel.
+    This provides full compatibility with mbrl-lib infrastructure while using analytical dynamics.
+    """
+
+    def __init__(self,
+                 model: Union[AnalyticalModel, HybridDynamicsModel],
+                 learned_rewards: bool = True):
+        """
+        Args:
+            model: The analytical model (e.g., KinovaKinematicModel or MockAnalyticalDynamics)
+            obs_dim: Dimension of observation space
+            action_dim: Dimension of action space
+            target_is_delta: Should be False for analytical models (they predict absolute states)
+            normalize: Should be False for analytical models
+            learned_rewards: Whether to learn rewards from data
+            reward_fn: Optional reward function if not learning rewards
+            obs2state_fn: Function to convert observations to model state format (default: identity)
+            state2obs_fn: Function to convert model state to observation format (default: identity)
+            device: torch device
+            **kwargs: Other arguments passed to OneDTransitionRewardModel
+        """
+
+        # Initialize the parent OneDTransitionRewardModel with our analytical model
+        super().__init__(
+            model=model,
+            target_is_delta=False,
+            learned_rewards=learned_rewards,
+        )

@@ -3,15 +3,9 @@ Analytical Model Wrapper for mbrl-lib integration
 Allows MBPO and Pets to use analytical dynamics models instead of learned models
 """
 import torch
-import numpy as np
 from typing import Dict, Optional, Tuple, Callable, Any
-import sys
-import os
-import hydra
 
 from mbrl.models.model import Model
-from mbrl.models.one_dim_tr_model import OneDTransitionRewardModel
-
 
 class AnalyticalModel(Model):
     """
@@ -50,17 +44,6 @@ class AnalyticalModel(Model):
         self.action_dim = action_dim
         self.in_size = in_size
         self.out_size = out_size
-
-        # Set conversion functions to use dynamics model methods if available
-        if hasattr(dynamics_model, 'obs2state'):
-            self.obs2state_fn = dynamics_model.obs2state
-        else:
-            self.obs2state_fn = lambda x: x  # Identity fallback
-
-        if hasattr(dynamics_model, 'state2obs'):
-            self.state2obs_fn = dynamics_model.state2obs
-        else:
-            self.state2obs_fn = lambda x: x  # Identity fallback
 
         # Reward predictor network (will be created when dimensions are set)
          # Rebuild reward network with correct input size if learning rewards
@@ -191,35 +174,3 @@ class AnalyticalModel(Model):
     def eval_score(self, model_in, target = None):
         """Analytical models don't need eval score."""
         pass
-
-
-class AnalyticalOneDTransitionRewardModel(OneDTransitionRewardModel):
-    """
-    Analytical model that inherits from OneDTransitionRewardModel.
-    This provides full compatibility with mbrl-lib infrastructure while using analytical dynamics.
-    """
-
-    def __init__(self,
-                 model: AnalyticalModel,
-                 learned_rewards: bool = True):
-        """
-        Args:
-            model: The analytical model (e.g., KinovaKinematicModel or MockAnalyticalDynamics)
-            obs_dim: Dimension of observation space
-            action_dim: Dimension of action space
-            target_is_delta: Should be False for analytical models (they predict absolute states)
-            normalize: Should be False for analytical models
-            learned_rewards: Whether to learn rewards from data
-            reward_fn: Optional reward function if not learning rewards
-            obs2state_fn: Function to convert observations to model state format (default: identity)
-            state2obs_fn: Function to convert model state to observation format (default: identity)
-            device: torch device
-            **kwargs: Other arguments passed to OneDTransitionRewardModel
-        """
-
-        # Initialize the parent OneDTransitionRewardModel with our analytical model
-        super().__init__(
-            model=model,
-            target_is_delta=False,
-            learned_rewards=learned_rewards,
-        )

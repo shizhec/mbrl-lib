@@ -1,11 +1,9 @@
 _target_: mbrl.models.analytical_model.AnalyticalModel
 dynamics_model:
-    _target_: common.dynamics.kinova_kinematic_model.KinovaKinematicModel
+    _target_: common.dynamics.kinova_kinematic_model.KinovaReachingObstaclesModel
     urdf_path: third_party/IsaacGymEnvs/assets/urdf/kinova_description/urdf/j2n6s300_clean.urdf
-    task_name: reach
     horizon: 1
     ee_link_name: j2n6s300_end_effector
-    approximator_load_path: src/common/weights/qd_approximator.pth
     tensor_args:
         device: ${device}
         dtype: float32

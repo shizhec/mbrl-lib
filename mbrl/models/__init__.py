@@ -7,8 +7,7 @@ from .gaussian_mlp import GaussianMLP
 from .model import Ensemble, Model
 from .model_env import ModelEnv
 from .model_trainer import ModelTrainer
-from .one_dim_tr_model import OneDTransitionRewardModel
-from .analytical_model import AnalyticalOneDTransitionRewardModel
+from .one_dim_tr_model import OneDTransitionRewardModel, AnalyticalOneDTransitionRewardModel
 from .planet import PlaNetModel
 from .util import (
     Conv2dDecoder,

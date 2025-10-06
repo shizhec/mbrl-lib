@@ -1,4 +1,4 @@
-_target_: mbrl.models.analytical_model.AnalyticalModel
+_target_: mbrl.models.hybrid_dynamics_model.HybridDynamicsModel
 dynamics_model:
     _target_: common.dynamics.kinova_kinematic_model.KinovaKinematicModel
     urdf_path: third_party/IsaacGymEnvs/assets/urdf/kinova_description/urdf/j2n6s300_gripper_clean.urdf
@@ -16,3 +16,9 @@ obs_dim: ???
 action_dim: ???
 in_size: ???
 out_size: ???
+# Scene dynamics ensemble configuration
+scene_net_ensemble_size: 5
+scene_net_hidden_size: 256
+scene_net_num_layers: 4
+predict_scene_delta: true
+scene_net_propagation_method: "random_model"
