@@ -2,10 +2,8 @@ _target_: mbrl.models.hybrid_dynamics_model.HybridDynamicsModel
 dynamics_model:
     _target_: common.dynamics.kinova_kinematic_model.KinovaKinematicModel
     urdf_path: third_party/IsaacGymEnvs/assets/urdf/kinova_description/urdf/j2n6s300_gripper_clean.urdf
-    task_name: pick_and_reach
     horizon: 1
     ee_link_name: j2n6s300_end_effector
-    approximator_load_path: src/common/weights/qd_approximator.pth
     tensor_args:
         device: ${device}
         dtype: float32
