@@ -20,12 +20,15 @@ from mbrl.models.model import Model
 from mbrl.models.gaussian_mlp import GaussianMLP
 
 
-class SceneDynamicNetwork(nn.Module):
+class HybridResidualNetwork(nn.Module):
     """
-    Gaussian MLP ensemble that learns scene dynamics given robot state and action.
+    Gaussian MLP ensemble that learns both robot state residuals and scene dynamics.
 
-    Input: [robot_state, action, scene_dynamic]
-    Output: [delta_scene_dynamic] or [next_scene_dynamic] with uncertainty
+    Input: [obs, action] where obs = [robot_state, scene_dynamic]
+    Output: [robot_state_residual, scene_dynamic_delta] with uncertainty
+
+    The robot_state_residual corrects analytical model predictions for unmodeled effects
+    like friction, collisions, and environmental disturbances.
     """
 
     def __init__(self,
@@ -36,13 +39,11 @@ class SceneDynamicNetwork(nn.Module):
                  ensemble_size: int = 5,
                  hidden_size: int = 256,
                  num_layers: int = 4,
-                 predict_delta: bool = True,
                  device: str = "cpu",
                  dtype: torch.dtype = torch.float32,
                  propagation_method: Optional[str] = None):
         super().__init__()
 
-        self.predict_delta = predict_delta
         self.device = device
         self.dtype = dtype
 
@@ -51,6 +52,9 @@ class SceneDynamicNetwork(nn.Module):
         self.obs_dim = obs_dim
         self.robot_state_dim = robot_state_dim
         self.scene_dynamic_dim = obs_dim - robot_state_dim
+
+        # Output includes both robot residuals and scene deltas
+        assert out_size == obs_dim, f"Output size must equal obs_dim ({obs_dim}), got {out_size}"
 
         # Use GaussianMLP ensemble for uncertainty quantification
         self.ensemble = GaussianMLP(
@@ -66,77 +70,39 @@ class SceneDynamicNetwork(nn.Module):
 
     def forward(self, model_in: torch.Tensor, use_propagation: bool = True) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
-        Predict next scene dynamic state with uncertainty.
+        Predict observation delta (robot residual + scene delta) with uncertainty.
 
         Args:
-            model_in: Input tensor [batch_size, obs_dim + action_dim] = [robot_state, scene_dynamic, action]
+            model_in: Input tensor [batch_size, obs_dim + action_dim] = [obs, action]
             use_propagation: Whether to use ensemble propagation
 
         Returns:
-            next_scene_dynamic: Next scene dynamic state [batch_size, scene_dynamic_dim]
-            logvar: Log variance of prediction [batch_size, scene_dynamic_dim] (if not using propagation)
+            obs_delta: Full observation delta [batch_size, obs_dim]
+                       [:robot_state_dim] = robot residual
+                       [robot_state_dim:] = scene delta
+            logvar: Log variance of prediction [batch_size, obs_dim] (if not using propagation)
         """
-        # Extract components from model_in format [robot_state, scene_dynamic, action]
-        # model_in = [obs, action] where obs = [robot_state, scene_dynamic]
-        obs = model_in[:, :self.obs_dim]
-        action = model_in[:, self.obs_dim:]
+        # Forward pass through ensemble - input is [obs, action]
+        obs_delta, pred_logvar = self.ensemble.forward(model_in, use_propagation=use_propagation)
 
-        robot_state = obs[:, :self.robot_state_dim]
-        scene_dynamic = obs[:, self.robot_state_dim:]
+        return obs_delta, pred_logvar
 
-        # Rearrange to [robot_state, action, scene_dynamic] for ensemble
-        x = torch.cat([robot_state, action, scene_dynamic], dim=-1)
-        pred_mean, pred_logvar = self.ensemble.forward(x, use_propagation=use_propagation)
-
-        if self.predict_delta:
-            if use_propagation or pred_mean.ndim == 2:
-                next_scene_dynamic = scene_dynamic + pred_mean
-            else:
-                # Handle ensemble dimension when not using propagation
-                next_scene_dynamic = scene_dynamic.unsqueeze(0) + pred_mean
-            return next_scene_dynamic, pred_logvar
-        else:
-            return pred_mean, pred_logvar
-
-    def sample_prediction(self, robot_state: torch.Tensor, action: torch.Tensor,
-                         scene_dynamic: torch.Tensor, rng: Optional[torch.Generator] = None) -> torch.Tensor:
-        """
-        Sample from the predictive distribution.
-
-        Args:
-            robot_state: Current robot state [batch_size, robot_state_dim]
-            action: Robot action [batch_size, action_dim]
-            scene_dynamic: Current scene dynamic state [batch_size, scene_dynamic_dim]
-            rng: Random number generator
-
-        Returns:
-            sampled_next_scene_dynamic: Sampled next scene dynamic state [batch_size, scene_dynamic_dim]
-        """
-        pred_mean, pred_logvar = self.forward(robot_state, action, scene_dynamic, use_propagation=True)
-
-        if pred_logvar is not None:
-            # Sample from Gaussian distribution
-            std = torch.exp(0.5 * pred_logvar)
-            if rng is not None:
-                eps = torch.randn_like(std, generator=rng)
-            else:
-                eps = torch.randn_like(std)
-            return pred_mean + eps * std
-        else:
-            return pred_mean
 
 
 class HybridDynamicsModel(Model):
     """
-    Hybrid dynamics model that combines analytical robot kinematics with learned scene dynamics.
+    Hybrid dynamics model that combines analytical robot kinematics with learned residuals.
 
     Architecture:
-    - Robot dynamics: Computed analytically using kinematic model (no learning needed)
-    - Scene dynamics: Learned via Gaussian MLP ensemble based on robot-scene interaction
+    - Robot dynamics: Analytical kinematic model + learned residual corrections
+    - Scene dynamics: Learned deltas via Gaussian MLP ensemble
     - Rewards: Can be learned or provided analytically
 
-    This approach leverages known physics for the robot while learning the complex
-    scene interaction dynamics that are difficult to model analytically.
+    The learned network predicts full observation deltas [robot_residual, scene_delta]:
+    - robot_residual: Corrects analytical model for friction, collisions, disturbances
+    - scene_delta: Predicts scene/object dynamics from robot-scene interactions
+
+    This approach leverages physics priors while learning corrections for unmodeled effects.
     """
 
     def __init__(self,
@@ -152,24 +118,21 @@ class HybridDynamicsModel(Model):
                  scene_net_ensemble_size: int = 5,
                  scene_net_hidden_size: int = 256,
                  scene_net_num_layers: int = 4,
-                 predict_scene_delta: bool = True,
                  scene_net_propagation_method: Optional[str] = None):
         """
         Args:
             dynamic_model: Analytical model for robot kinematics (e.g., KinovaKinematicModel)
             obs_dim: Full observation dimension
             action_dim: Action dimension
-            robot_state_dim: Dimension of robot state portion in observation
             in_size: Input size for training (obs_dim + action_dim)
             out_size: Output size for training (obs_dim + reward_dim if learning rewards)
             reward_fn: Function for computing rewards if not learning them
             device: torch device
             dtype: torch dtype
             learned_rewards: Whether to learn rewards from data
-            scene_net_ensemble_size: Number of models in scene dynamics ensemble
-            scene_net_hidden_size: Hidden layer size for scene dynamics network
-            scene_net_num_layers: Number of layers in scene dynamics network
-            predict_scene_delta: Whether scene network predicts delta or absolute state
+            scene_net_ensemble_size: Number of models in residual network ensemble
+            scene_net_hidden_size: Hidden layer size for residual network
+            scene_net_num_layers: Number of layers in residual network
             scene_net_propagation_method: Uncertainty propagation method for ensemble
         """
         super().__init__(device)
@@ -192,16 +155,15 @@ class HybridDynamicsModel(Model):
         assert self.scene_dynamic_dim > 0, \
             f"scene_dynamic_dim ({self.scene_dynamic_dim}) must be > 0"
 
-        # Scene dynamics network - only this part needs learning
-        self.scene_dynamics = SceneDynamicNetwork(
+        # Hybrid residual network - learns both robot residuals and scene deltas
+        self.residual_network = HybridResidualNetwork(
             in_size=self.in_size,
-            out_size=self.scene_dynamic_dim,
+            out_size=self.obs_dim,  # Full observation delta
             obs_dim=self.obs_dim,
             robot_state_dim=self.robot_state_dim,
             ensemble_size=scene_net_ensemble_size,
             hidden_size=scene_net_hidden_size,
             num_layers=scene_net_num_layers,
-            predict_delta=predict_scene_delta,
             device=device,
             dtype=dtype,
             propagation_method=scene_net_propagation_method
@@ -217,18 +179,8 @@ class HybridDynamicsModel(Model):
                 nn.Linear(64, 1)
             ).to(device=device, dtype=dtype)
 
-        # Set conversion functions from kinematic model if available
-        if hasattr(dynamics_model, 'obs2state'):
-            self.obs2state_fn = dynamics_model.obs2state
-        else:
-            self.obs2state_fn = lambda x: x  # Identity fallback
 
-        if hasattr(dynamics_model, 'state2obs'):
-            self.state2obs_fn = dynamics_model.state2obs
-        else:
-            self.state2obs_fn = lambda x: x  # Identity fallback
-
-    def _split_observation(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _split_observation(self, obs: torch.Tensor, with_eef_pos: bool = True) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Split observation into robot state and scene dynamic state.
 
@@ -239,8 +191,12 @@ class HybridDynamicsModel(Model):
             robot_state: [batch_size, robot_state_dim]
             scene_dynamic: [batch_size, scene_dynamic_dim]
         """
-        robot_state = obs[:, :self.robot_state_dim]
-        scene_dynamic = obs[:, self.robot_state_dim:]
+        if with_eef_pos:
+            robot_state = obs[:, :self.robot_state_dim + 3]
+            scene_dynamic = obs[:, self.robot_state_dim + 3:]
+        else:
+            robot_state = obs[:, :self.robot_state_dim]
+            scene_dynamic = obs[:, self.robot_state_dim:]
 
         return robot_state, scene_dynamic
 
@@ -308,10 +264,11 @@ class HybridDynamicsModel(Model):
 
     def get_next_obs(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         """
-        Predict next observation using hybrid approach:
-        1. Use analytical model for robot kinematics
-        2. Use learned model for scene dynamics
-        3. Combine results
+        Predict next observation using hybrid residual approach:
+        1. Use rollout_open_loop to get analytical robot state [pos, vel, eef_pos]
+        2. Combine with current scene to form analytical next_obs
+        3. Use learned network to predict full obs_delta
+        4. Apply: next_obs = next_obs_analytical + obs_delta
 
         Args:
             obs: Current observation [batch_size, obs_dim]
@@ -323,14 +280,27 @@ class HybridDynamicsModel(Model):
         # Split observation into components
         robot_state, scene_dynamic = self._split_observation(obs)
 
-        next_robot_state = self.dynamics_model.get_next_state(robot_state, action)
+        # 1. Use rollout_open_loop to get next robot state [pos, vel, eef_pos]
+        action_seq = action.unsqueeze(1)  # Add time dimension: [batch_size, 1, action_dim]
+        state_dict = self.dynamics_model.rollout_open_loop(robot_state, action_seq)
 
-        # 2. Get next scene dynamic state using learned dynamics with uncertainty
-        model_in_scene = torch.cat([obs, action], dim=-1)
-        next_scene_dynamic, _ = self.scene_dynamics(model_in_scene, use_propagation=True)
+        # Extract next state: [pos, vel] from state_seq[:, 0, :]
+        next_joint_state = state_dict['state_seq'][:, 0, :]  # [batch_size, 2*n_dofs]
+        # Extract eef_pos from ee_pos_seq[:, 0, :]
+        next_eef_pos = state_dict['ee_pos_seq'][:, 0, :]  # [batch_size, 3]
 
-        # 3. Combine into full next observation
-        next_obs = self._combine_states(next_robot_state, next_scene_dynamic)
+        # Combine to form full robot state [pos, vel, eef_pos]
+        next_robot_state_analytical = torch.cat([next_joint_state, next_eef_pos], dim=-1)
+
+        # 2. Form analytical next observation [robot_state, scene_dynamic]
+        next_obs_analytical = self._combine_states(next_robot_state_analytical, scene_dynamic)
+
+        # 3. Get learned observation delta
+        model_in = torch.cat([obs, action], dim=-1)
+        obs_delta, _ = self.residual_network(model_in, use_propagation=True)
+
+        # 4. Apply delta to analytical prediction
+        next_obs = next_obs_analytical + obs_delta
 
         return next_obs
 
@@ -349,9 +319,10 @@ class HybridDynamicsModel(Model):
 
     def loss(self, model_in: torch.Tensor, target: torch.Tensor = None) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
-        Compute loss for hybrid model:
-        - Robot dynamics loss is always 0 (analytical)
-        - Scene dynamics loss computed from learned ensemble
+        Compute loss for hybrid residual model:
+        - Observation delta loss: trains network to predict obs_delta
+        - obs_delta = target_next_obs - analytical_next_obs
+        - Analytical prediction uses rollout_open_loop for full robot state
         - Reward loss computed if learning rewards
         """
         if target is None:
@@ -365,16 +336,32 @@ class HybridDynamicsModel(Model):
             target_next_obs = target
             target_rewards = None
 
-        # Extract target scene dynamics (only part we're learning)
-        _, target_scene_dynamic = self._split_observation(target_next_obs)
+        # Extract current observation and action
+        obs = model_in[:, :self.obs_dim]
+        action = model_in[:, self.obs_dim:]
+        robot_state, scene_dynamic = self._split_observation(obs)
 
-        # Scene dynamics loss - only part we're learning
-        # Use the ensemble's loss function which includes Gaussian NLL
-        scene_loss, scene_loss_dict = self.scene_dynamics.ensemble.loss(model_in, target_scene_dynamic)
+        # Compute analytical next observation using rollout_open_loop
+        action_seq = action.unsqueeze(1)  # [batch_size, 1, action_dim]
+        state_dict = self.dynamics_model.rollout_open_loop(robot_state, action_seq)
 
-        loss_dict = {"scene_dynamics_loss": scene_loss.item()}
-        loss_dict.update(scene_loss_dict)
-        total_loss = scene_loss
+        # Extract and combine to form analytical robot state [pos, vel, eef_pos]
+        next_joint_state = state_dict['state_seq'][:, 0, :]  # [batch_size, 2*n_dofs]
+        next_eef_pos = state_dict['ee_pos_seq'][:, 0, :]  # [batch_size, 3]
+        analytical_next_robot = torch.cat([next_joint_state, next_eef_pos], dim=-1)
+
+        # Form analytical next observation
+        analytical_next_obs = self._combine_states(analytical_next_robot, scene_dynamic)
+
+        # Compute target observation delta
+        # obs_delta = target_next_obs - analytical_next_obs
+        target_obs_delta = target_next_obs - analytical_next_obs
+
+        # Compute loss using ensemble's Gaussian NLL
+        obs_delta_loss, loss_dict = self.residual_network.ensemble.loss(model_in, target_obs_delta)
+
+        loss_dict["obs_delta_loss"] = obs_delta_loss.item()
+        total_loss = obs_delta_loss
 
         # Reward loss if learning rewards
         if self.learned_rewards and target_rewards is not None:
@@ -389,13 +376,17 @@ class HybridDynamicsModel(Model):
         """Reset the model state."""
         return {}
 
+    def set_elite(self, elite_indices: list):
+        """Set elite ensemble members. Delegates to the residual network's ensemble."""
+        self.residual_network.ensemble.set_elite(elite_indices)
+
     def save(self, save_dir):
-        """Save learned components (scene dynamics and reward networks)."""
+        """Save learned components (residual network and reward networks)."""
         import os
         os.makedirs(save_dir, exist_ok=True)
 
-        # Save scene dynamics ensemble
-        self.scene_dynamics.ensemble.save(save_dir)
+        # Save residual network ensemble
+        self.residual_network.ensemble.save(save_dir)
 
         # Save reward network if learning rewards
         if self.learned_rewards and hasattr(self, 'reward_net'):
@@ -403,11 +394,11 @@ class HybridDynamicsModel(Model):
                       os.path.join(save_dir, "reward_net.pth"))
 
     def load(self, load_dir):
-        """Load learned components (scene dynamics and reward networks)."""
+        """Load learned components (residual network and reward networks)."""
         import os
 
-        # Load scene dynamics ensemble
-        self.scene_dynamics.ensemble.load(load_dir)
+        # Load residual network ensemble
+        self.residual_network.ensemble.load(load_dir)
 
         # Load reward network if learning rewards
         if self.learned_rewards and hasattr(self, 'reward_net'):
@@ -415,31 +406,59 @@ class HybridDynamicsModel(Model):
             if os.path.exists(reward_net_path):
                 self.reward_net.load_state_dict(torch.load(reward_net_path, map_location=self.device))
 
-    def eval_score(self, model_in: torch.Tensor, target: torch.Tensor = None) -> Dict[str, float]:
-        """Evaluation metrics for the hybrid model."""
+    def eval_score(self, model_in: torch.Tensor, target: torch.Tensor = None) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        """Evaluation metrics for the hybrid residual model.
+
+        Returns:
+            score: Per-sample, per-ensemble-member squared errors [num_members, batch_size, obs_dim]
+            meta: Dictionary of additional metrics
+        """
         if target is None:
-            return {}
+            num_members = self.residual_network.ensemble.num_members
+            batch_size = model_in.shape[0]
+            return torch.zeros(num_members, batch_size, self.obs_dim, device=self.device), {}
 
-        with torch.no_grad():
-            loss_val, loss_dict = self.loss(model_in, target)
-
-        # Add scene dynamics prediction accuracy
-        obs = model_in[:, :self.obs_dim]
-        action = model_in[:, self.obs_dim:]
-
+        # Get target next observation
         if self.learned_rewards:
             target_next_obs = target[:, :self.obs_dim]
         else:
             target_next_obs = target
 
+        # Compute analytical next observation (same as in loss function)
+        obs = model_in[:, :self.obs_dim]
+        action = model_in[:, self.obs_dim:]
         robot_state, scene_dynamic = self._split_observation(obs)
-        _, target_scene_dynamic = self._split_observation(target_next_obs)
 
+        # Get analytical prediction using rollout_open_loop
+        action_seq = action.unsqueeze(1)
+        state_dict = self.dynamics_model.rollout_open_loop(robot_state, action_seq)
+        next_joint_state = state_dict['state_seq'][:, 0, :]
+        next_eef_pos = state_dict['ee_pos_seq'][:, 0, :]
+        analytical_next_robot = torch.cat([next_joint_state, next_eef_pos], dim=-1)
+        analytical_next_obs = self._combine_states(analytical_next_robot, scene_dynamic)
+
+        # Target delta for the residual network
+        target_obs_delta = target_next_obs - analytical_next_obs
+
+        # Use the ensemble's eval_score to get per-member squared errors
         with torch.no_grad():
-            pred_next_scene_dynamic, _ = self.scene_dynamics(robot_state, action, scene_dynamic, use_propagation=True)
-            scene_mse = nn.functional.mse_loss(pred_next_scene_dynamic, target_scene_dynamic)
+            # This returns [num_members, batch_size, obs_dim] with reduction="none"
+            squared_errors, _ = self.residual_network.ensemble.eval_score(model_in, target_obs_delta)
 
-        eval_dict = loss_dict.copy()
-        eval_dict["scene_dynamics_mse"] = scene_mse.item()
+            # Compute additional metadata using single prediction (with propagation)
+            pred_next_obs = self.get_next_obs(obs, action)
+            obs_mse = nn.functional.mse_loss(pred_next_obs, target_next_obs)
 
-        return eval_dict
+            pred_robot, pred_scene = self._split_observation(pred_next_obs)
+            target_robot, target_scene = self._split_observation(target_next_obs)
+
+            robot_mse = nn.functional.mse_loss(pred_robot, target_robot)
+            scene_mse = nn.functional.mse_loss(pred_scene, target_scene)
+
+        eval_dict = {
+            "obs_mse": obs_mse.item(),
+            "robot_mse": robot_mse.item(),
+            "scene_mse": scene_mse.item()
+        }
+
+        return squared_errors, eval_dict

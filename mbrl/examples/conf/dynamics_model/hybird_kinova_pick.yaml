@@ -15,8 +15,7 @@ action_dim: ???
 in_size: ???
 out_size: ???
 # Scene dynamics ensemble configuration
-scene_net_ensemble_size: 5
+scene_net_ensemble_size: 4
 scene_net_hidden_size: 256
 scene_net_num_layers: 4
-predict_scene_delta: true
 scene_net_propagation_method: "random_model"
