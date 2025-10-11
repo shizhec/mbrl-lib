@@ -10,6 +10,7 @@ import hydra.utils
 import numpy as np
 import omegaconf
 import torch
+from tqdm import tqdm
 
 import mbrl.constants
 import mbrl.models
@@ -194,6 +195,8 @@ def train(
     best_eval_reward = -np.inf
     epoch = 0
     sac_buffer = None
+    pbar = tqdm(total=cfg.overrides.num_steps, desc="MBPO Training", unit="step")
+    pbar.update(env_steps)
     while env_steps < cfg.overrides.num_steps:
         rollout_length = int(
             mbrl.util.math.truncated_linear(
@@ -300,5 +303,7 @@ def train(
                 epoch += 1
 
             env_steps += 1
+            pbar.update(1)
             obs = next_obs
+    pbar.close()
     return np.float32(best_eval_reward)
