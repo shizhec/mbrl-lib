@@ -388,6 +388,7 @@ def train_model_and_save_model_and_data(
     replay_buffer: ReplayBuffer,
     work_dir: Optional[Union[str, pathlib.Path]] = None,
     callback: Optional[Callable] = None,
+    silent: bool = False,
 ):
     """Convenience function for training a model and saving results.
 
@@ -436,6 +437,7 @@ def train_model_and_save_model_and_data(
         improvement_threshold=cfg.get("improvement_threshold", 0.01),
         callback=callback,
         evaluate=evaluate,
+        silent=silent,
     )
     if work_dir is not None:
         model.save(str(work_dir))

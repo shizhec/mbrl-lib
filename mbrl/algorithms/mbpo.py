@@ -136,7 +136,7 @@ def train(
 
     work_dir = work_dir or os.getcwd()
     # enable_back_compatible to use pytorch_sac agent
-    logger = mbrl.util.Logger(work_dir, enable_back_compatible=True)
+    logger = mbrl.util.Logger(work_dir, enable_back_compatible=True, silent=silent)
     logger.register_group(
         mbrl.constants.RESULTS_LOG_NAME,
         MBPO_LOG_FORMAT,
@@ -190,7 +190,7 @@ def train(
         dynamics_model,
         optim_lr=cfg.overrides.model_lr,
         weight_decay=cfg.overrides.model_wd,
-        logger=None if silent else logger,
+        logger=logger,
     )
     best_eval_reward = -np.inf
     epoch = 0
@@ -300,6 +300,14 @@ def train(
                     agent.sac_agent.save_checkpoint(
                         ckpt_path=os.path.join(work_dir, "sac.pth")
                     )
+
+                # Update progress bar with epoch and reward info
+                pbar.set_postfix({
+                    'epoch': epoch,
+                    'reward': f'{avg_reward:.2f}',
+                    'best': f'{best_eval_reward:.2f}'
+                })
+
                 epoch += 1
 
             env_steps += 1

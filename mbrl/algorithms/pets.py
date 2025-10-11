@@ -9,6 +9,7 @@ import gymnasium as gym
 import numpy as np
 import omegaconf
 import torch
+from tqdm import tqdm
 
 import mbrl.constants
 import mbrl.models
@@ -42,15 +43,14 @@ def train(
         torch_generator.manual_seed(cfg.seed)
 
     work_dir = work_dir or os.getcwd()
-    print(f"Results will be saved at {work_dir}.")
+    if not silent:
+        print(f"Results will be saved at {work_dir}.")
 
-    if silent:
-        logger = None
-    else:
-        logger = mbrl.util.Logger(work_dir)
-        logger.register_group(
-            mbrl.constants.RESULTS_LOG_NAME, EVAL_LOG_FORMAT, color="green"
-        )
+    # Always create logger, but with silent=True to suppress console output when needed
+    logger = mbrl.util.Logger(work_dir, silent=silent)
+    logger.register_group(
+        mbrl.constants.RESULTS_LOG_NAME, EVAL_LOG_FORMAT, color="green"
+    )
 
     # -------- Create and populate initial env dataset --------
     dynamics_model = mbrl.util.common.create_one_dim_tr_model(cfg, obs_shape, act_shape)
@@ -98,6 +98,8 @@ def train(
     env_steps = 0
     current_trial = 0
     max_total_reward = -np.inf
+    pbar = tqdm(total=cfg.overrides.num_steps, desc="PETS Training", unit="step")
+    pbar.update(env_steps)
     while env_steps < cfg.overrides.num_steps:
         obs, _ = env.reset()
         agent.reset()
@@ -114,6 +116,7 @@ def train(
                     cfg.overrides,
                     replay_buffer,
                     work_dir=work_dir,
+                    silent=silent,
                 )
 
             # --- Doing env step using the agent and adding to model dataset ---
@@ -135,6 +138,7 @@ def train(
             total_reward += reward
             steps_trial += 1
             env_steps += 1
+            pbar.update(1)
 
             if debug_mode:
                 print(f"Step {env_steps}: Reward {reward:.3f}.")
@@ -145,9 +149,17 @@ def train(
                 {"env_step": env_steps, "episode_reward": total_reward},
             )
         current_trial += 1
+
+        # Update progress bar with episode reward info
+        max_total_reward = max(max_total_reward, total_reward)
+        pbar.set_postfix({
+            'episode': current_trial,
+            'reward': f'{total_reward:.2f}',
+            'best': f'{max_total_reward:.2f}'
+        })
+
         if debug_mode:
             print(f"Trial: {current_trial }, reward: {total_reward}.")
 
-        max_total_reward = max(max_total_reward, total_reward)
-
+    pbar.close()
     return np.float32(max_total_reward)

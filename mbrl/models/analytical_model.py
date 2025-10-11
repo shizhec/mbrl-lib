@@ -164,13 +164,51 @@ class AnalyticalModel(Model):
             return torch.tensor(0.0, device=self.device), {}
 
     def save(self, save_dir):
-        """Analytical models don't need saving."""
-        pass
+        """
+        Save analytical model.
+        - For pure analytical models (learned_rewards=False): nothing to save
+        - For hybrid models (learned_rewards=True): save the learned reward network
+        """
+        if self.learned_rewards and hasattr(self, 'reward_net'):
+            import pathlib
+            save_path = pathlib.Path(save_dir)
+            save_path.mkdir(parents=True, exist_ok=True)
+            torch.save(
+                self.reward_net.state_dict(),
+                save_path / "analytical_model_reward_net.pth"
+            )
 
     def load(self, load_dir):
-        """Analytical models don't need loading."""
-        pass
+        """
+        Load analytical model.
+        - For pure analytical models (learned_rewards=False): nothing to load
+        - For hybrid models (learned_rewards=True): load the learned reward network
+        """
+        if self.learned_rewards and hasattr(self, 'reward_net'):
+            import pathlib
+            load_path = pathlib.Path(load_dir) / "analytical_model_reward_net.pth"
+            if load_path.exists():
+                self.reward_net.load_state_dict(torch.load(load_path))
+            else:
+                print(f"Warning: No saved reward network found at {load_path}")
 
     def eval_score(self, model_in, target = None):
-        """Analytical models don't need eval score."""
-        pass
+        """
+        Compute evaluation score for analytical models.
+        - Dynamics: always perfect (analytical), so score is 0
+        - Rewards: if learned, compute MSE between predicted and target rewards
+        """
+        if not self.learned_rewards or target is None:
+            return torch.tensor(0.0, device=self.device), {}
+
+        with torch.no_grad():
+            # Predict rewards
+            pred_rewards = self.reward_net(model_in)
+
+            # Extract target rewards (last column of target)
+            target_rewards = target[:, -1:]
+
+            # Compute MSE for evaluation
+            reward_mse = torch.nn.functional.mse_loss(pred_rewards, target_rewards, reduction='none')
+
+            return reward_mse, {"reward_mse": reward_mse.mean().item()}

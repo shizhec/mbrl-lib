@@ -44,12 +44,13 @@ class AverageMeter(object):
 
 
 class MetersGroup(object):
-    def __init__(self, file_name: Union[str, pathlib.Path], formatting: LogFormatType):
+    def __init__(self, file_name: Union[str, pathlib.Path], formatting: LogFormatType, silent: bool = False):
         self._csv_file_path = self._prepare_file(file_name, ".csv")
         self._formatting = formatting
         self._meters: Dict[str, AverageMeter] = collections.defaultdict(AverageMeter)
         self._csv_file = open(self._csv_file_path, "w")
         self._csv_writer = None
+        self._silent = silent
 
     @staticmethod
     def _prepare_file(prefix: Union[str, pathlib.Path], suffix: str) -> pathlib.Path:
@@ -97,7 +98,8 @@ class MetersGroup(object):
             data = {key: meter.value() for key, meter in self._meters.items()}
             data["step"] = step
             self._dump_to_csv(data)
-            self._dump_to_console(data, prefix, color)
+            if not self._silent:
+                self._dump_to_console(data, prefix, color)
         self._meters.clear()
 
 
@@ -119,11 +121,12 @@ class Logger(object):
     """
 
     def __init__(
-        self, log_dir: Union[str, pathlib.Path], enable_back_compatible: bool = False
+        self, log_dir: Union[str, pathlib.Path], enable_back_compatible: bool = False, silent: bool = False
     ):
         self._log_dir = pathlib.Path(log_dir)
         self._groups: Dict[str, Tuple[MetersGroup, int, str]] = {}
         self._group_steps: Counter[str] = collections.Counter()
+        self._silent = silent
 
         if enable_back_compatible:
             self.register_group("train", SAC_TRAIN_LOG_FORMAT)
@@ -155,7 +158,7 @@ class Logger(object):
         if group_name in self._groups:
             print(f"Group {group_name} has already been registered.")
             return
-        new_group = MetersGroup(self._log_dir / group_name, formatting=log_format)
+        new_group = MetersGroup(self._log_dir / group_name, formatting=log_format, silent=self._silent)
         self._groups[group_name] = (new_group, dump_frequency, color)
         self._group_steps[group_name] = 0
 
