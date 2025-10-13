@@ -19,3 +19,7 @@ scene_net_ensemble_size: 4
 scene_net_hidden_size: 256
 scene_net_num_layers: 4
 scene_net_propagation_method: "random_model"
+grad_clip: false
+grad_clip_value: 5.0
+use_spectral_norm: false
+use_layer_norm: true

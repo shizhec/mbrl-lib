@@ -41,7 +41,11 @@ class HybridResidualNetwork(nn.Module):
                  num_layers: int = 4,
                  device: str = "cpu",
                  dtype: torch.dtype = torch.float32,
-                 propagation_method: Optional[str] = None):
+                 propagation_method: Optional[str] = None,
+                 grad_clip: bool = False,
+                 grad_clip_value: float = 5.0,
+                 use_spectral_norm: bool = False,
+                 use_layer_norm: bool = False):
         super().__init__()
 
         self.device = device
@@ -65,7 +69,11 @@ class HybridResidualNetwork(nn.Module):
             ensemble_size=ensemble_size,
             hid_size=hidden_size,
             deterministic=False,  # Enable uncertainty prediction
-            propagation_method=propagation_method
+            propagation_method=propagation_method,
+            grad_clip=grad_clip,
+            grad_clip_value=grad_clip_value,
+            use_spectral_norm=use_spectral_norm,
+            use_layer_norm=use_layer_norm
         ).to(dtype=dtype)
 
     def forward(self, model_in: torch.Tensor, use_propagation: bool = True) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
@@ -118,7 +126,11 @@ class HybridDynamicsModel(Model):
                  scene_net_ensemble_size: int = 5,
                  scene_net_hidden_size: int = 256,
                  scene_net_num_layers: int = 4,
-                 scene_net_propagation_method: Optional[str] = None):
+                 scene_net_propagation_method: Optional[str] = None,
+                 grad_clip: bool = False,
+                 grad_clip_value: float = 5.0,
+                 use_spectral_norm: bool = False,
+                 use_layer_norm: bool = False):
         """
         Args:
             dynamic_model: Analytical model for robot kinematics (e.g., KinovaKinematicModel)
@@ -134,6 +146,10 @@ class HybridDynamicsModel(Model):
             scene_net_hidden_size: Hidden layer size for residual network
             scene_net_num_layers: Number of layers in residual network
             scene_net_propagation_method: Uncertainty propagation method for ensemble
+            grad_clip: Whether to use gradient clipping during training
+            grad_clip_value: Maximum gradient norm when gradient clipping is enabled
+            use_spectral_norm: Whether to use spectral normalization on network layers
+            use_layer_norm: Whether to use layer normalization in the network
         """
         super().__init__(device)
 
@@ -166,7 +182,11 @@ class HybridDynamicsModel(Model):
             num_layers=scene_net_num_layers,
             device=device,
             dtype=dtype,
-            propagation_method=scene_net_propagation_method
+            propagation_method=scene_net_propagation_method,
+            grad_clip=grad_clip,
+            grad_clip_value=grad_clip_value,
+            use_spectral_norm=use_spectral_norm,
+            use_layer_norm=use_layer_norm
         )
 
         # Reward network if learning rewards
