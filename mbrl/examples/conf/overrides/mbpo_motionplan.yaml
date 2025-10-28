@@ -13,7 +13,7 @@ model_batch_size: 256
 validation_ratio: 0.2
 freq_train_model: 250
 effective_model_rollouts_per_step: 400
-rollout_schedule: [10, 100, 1, 25]  # FIXED: Start with 20-step rollouts, max 100 steps by epoch 25
+rollout_schedule: [1, 15, 1, 1]  # FIXED: Start with 20-step rollouts, max 100 steps by epoch 25
 num_sac_updates_per_step: 20  # Increased from 10 to 20 for better policy learning
 sac_updates_every_steps: 1
 num_epochs_to_retain_sac_buffer: 1
@@ -23,8 +23,8 @@ sac_tau: 0.005
 sac_alpha: 0.2
 sac_policy: "Gaussian"
 sac_target_update_interval: 4  # Changed from 1 to 4 (standard for MBPO)
-sac_automatic_entropy_tuning: true
+sac_automatic_entropy_tuning: True
 sac_hidden_size: 256  # Increased from 256 to 512 for better capacity
-sac_lr: 0.0003
+sac_lr: 0.0001
 sac_batch_size: 256
-sac_target_entropy: -1
+sac_target_entropy: -0.05

@@ -1,0 +1,25 @@
+_target_: mbrl.models.hybrid_dynamics_model.HybridDynamicsModel
+dynamics_model:
+    _target_: common.dynamics.kinova_kinematic_model.KinovaReachModel
+    urdf_path: third_party/IsaacGymEnvs/assets/urdf/kinova_description/urdf/j2n6s300_clean.urdf
+    horizon: 1
+    ee_link_name: j2n6s300_end_effector
+    tensor_args:
+        device: ${device}
+        dtype: float32
+reward_fn: None  # Will use learned rewards
+device: ${device}
+learned_rewards: True
+obs_dim: ???
+action_dim: ???
+in_size: ???
+out_size: ???
+# Scene dynamics ensemble configuration
+scene_net_ensemble_size: 4
+scene_net_hidden_size: 256
+scene_net_num_layers: 4
+scene_net_propagation_method: "random_model"
+grad_clip: false
+grad_clip_value: 5.0
+use_spectral_norm: false
+use_layer_norm: true
