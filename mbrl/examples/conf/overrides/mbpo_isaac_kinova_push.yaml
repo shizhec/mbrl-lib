@@ -1,8 +1,8 @@
 env: "IsaacGymEnv"
 term_fn: "no_termination"
 
-num_steps: 400000
-epoch_length: 500
+num_steps: 80000
+epoch_length: 300
 num_elites: 5
 num_epochs_train_model: 25
 patience: 10
@@ -28,8 +28,10 @@ sac_lr: 0.0001
 sac_batch_size: 256
 sac_target_entropy: -1
 
+
+# if given, will override the device setting in gym. 
 isaac:
-  task_name: KinovaPickAndReach
+  task_name: KinovaPush
   sim_device: 'cuda:0'
   rl_device: 'cuda:0'
   graphics_device_id: 0
@@ -41,19 +43,19 @@ isaac:
   capture_video_freq: 1464
   capture_video_len: 100
 
-  # if given, will override the device setting in gym. 
+# if given, will override the device setting in gym. 
   task:
     name: KinovaFetch
-    sub_task: "pick_and_reach"
+    sub_task: "push"
 
     physics_engine: physx
     debug_vis: False
     test: False
 
-    # if given, will override the device setting in gym. 
+  # if given, will override the device setting in gym. 
     env:
-      numEnvs: 128
-      episodeLength: 500
+      numEnvs: 64
+      episodeLength: 300
       random_reset: True
       enableDebugVis: False
 

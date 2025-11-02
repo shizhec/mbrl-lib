@@ -4,7 +4,7 @@ term_fn: "no_termination"
 learned_rewards: true
 trial_length: 1000
 
-num_steps: 1562500
+num_steps: 80000
 
 # CEM Planning parameters
 planning_horizon: 15
@@ -53,7 +53,7 @@ isaac:
       random_reset: True
       enableDebugVis: False
 
-      kinovaDofNoise: 0.10
+      kinovaDofNoise: 0.15
 
       asset:
         assetRoot: "../../assets/urdf/kinova_description/urdf"

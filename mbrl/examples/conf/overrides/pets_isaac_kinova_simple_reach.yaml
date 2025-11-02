@@ -4,7 +4,7 @@ term_fn: "no_termination"
 learned_rewards: true
 trial_length: 1000
 
-num_steps: 128000
+num_steps: 32000
 
 # CEM Planning parameters
 planning_horizon: 15
